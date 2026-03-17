@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+
+# Build outputs
+.next/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Python virtual environments
+venv/
+**/venv/
+**/.venv/
+
+# Local dev scripts
+start-local.sh
+
+# CDK
+cdk.context.json
+cdk/cdk.out/
+
+# Bedrock AgentCore
+.bedrock_agentcore.yaml
+.bedrock_agentcore/
+
+# E2E auth state
+e2e/.auth/
+
+
+# Kiro specs and steering (internal design docs)
+.kiro/
