@@ -2,6 +2,8 @@
 
 An AI-powered learning platform that transforms multimedia content — videos, audio, PDFs, and images — into a personalized, interactive learning experience. Upload your content, and the assistant builds a searchable knowledge base, creates structured courses, delivers adaptive lessons, quizzes you with intelligent feedback, and tracks your progress over time.
 
+https://github.com/user-attachments/assets/667178b2-24a7-4ae6-8f39-532189c84ff6
+
 ## What You Can Do
 
 **Turn any content into a knowledge base.** Upload videos, podcasts, PDFs, or images and the platform automatically extracts, indexes, and organizes the content. Ask questions in natural language and get answers with citations that link directly to the source — click a video timestamp to jump to the exact moment, or a page reference to open the right spot in a PDF.
@@ -28,8 +30,8 @@ The application consists of three independent codebases deployed as a modular AW
 
 ### Application Layer
 
-- **`agent/`** — Python backend powered by [Strands Agents](https://github.com/strands-agents/strands-agents) and FastAPI. An orchestrator agent with 20+ tools handles knowledge base search, course creation, lesson delivery, quiz generation, progress tracking, and web research. Serves the [AG-UI protocol](https://docs.ag-ui.com) for real-time frontend communication. Voice mode uses BidiAgent with Amazon Nova Sonic for speech-to-speech.
-- **`frontend/`** — Next.js + React + TypeScript with [CopilotKit](https://www.copilotkit.ai/) for the chat interface. Interactive UI components for quizzes, flashcards, checklists, media viewing, and progress dashboards. Deploys as a static site to S3/CloudFront.
+- **`agent/`** — Python backend powered by [Strands Agents](https://github.com/strands-agents/strands-agents) and FastAPI. An orchestrator agent with 20 tools (9 core + 11 self-study) handles knowledge base search, course creation, lesson delivery, quiz generation, progress tracking, and web research. Serves the [AG-UI protocol](https://docs.ag-ui.com) for real-time frontend communication. Voice mode uses BidiAgent with Amazon Nova Sonic for speech-to-speech.
+- **`frontend/`** — Next.js 16 + React 19 + TypeScript with [CopilotKit](https://www.copilotkit.ai/) for the chat interface. Interactive UI components (QuizCard, FlashcardDeck, MediaViewer, DataPanel) for quizzes, flashcards, checklists, media viewing, file upload/processing, and progress dashboards. Deploys as a static site to S3/CloudFront.
 - **`cdk/`** — AWS CDK (TypeScript) infrastructure-as-code. One-command deployment of the full stack.
 
 ### Infrastructure Stacks (CDK)
@@ -54,6 +56,7 @@ The application consists of three independent codebases deployed as a modular AW
    - BDA Processing Lambda: Processes extraction results into searchable text with metadata (timestamps, speakers, page numbers)
    - Bedrock Knowledge Base with vector store integration
    - DynamoDB table for courses, user progress, and preferences
+   - File Status DynamoDB table for tracking upload and processing state per file
 
 5. **AgentCore Stack** (`agentcore-stack.ts`, optional — deployed when `deployAgentCore=true`)
    - AgentCore Memory for conversation persistence (STM + LTM)
@@ -66,7 +69,7 @@ The application consists of three independent codebases deployed as a modular AW
 |---------|---------|
 | Amazon Bedrock | Foundation models (Claude) for the AI assistant |
 | Amazon Nova Sonic | Real-time speech-to-speech voice conversations |
-| Bedrock Knowledge Bases | Vector search over uploaded and researched content |
+| Bedrock Knowledge Bases | Vector search over uploaded and researched content (retrieves 15 results, reranks to top 5 via Cohere Rerank) |
 | Bedrock Data Automation | Extracts text from videos, audio, PDFs, and images |
 | Bedrock AgentCore Runtime | Managed agent hosting with memory integration |
 | Amazon OpenSearch Serverless | Vector store for knowledge base embeddings |
@@ -90,7 +93,7 @@ Upload (video/audio/PDF/image)
 
 | Parameter | Description | Default/Constraints |
 |-----------|-------------|-------------------|
-| ModelId | The Amazon Bedrock supported LLM inference profile ID used for inference. | Default: "us.anthropic.claude-sonnet-4-6-v1" |
+| ModelId | The Amazon Bedrock supported LLM inference profile ID used for inference. | Default: "us.anthropic.claude-sonnet-4-6" |
 | EmbeddingModelId | The Amazon Bedrock supported embedding LLM ID used in Bedrock Knowledge Base. | Default: "amazon.titan-embed-text-v2:0" |
 | DataParser | The data processing strategy to use for multimedia content. | Default: "Bedrock Data Automation" |
 | ResourceSuffix | Suffix to append to resource names (e.g., dev, test, prod) | Alphanumeric + hyphens, 1-20 chars |
@@ -124,6 +127,7 @@ Upload (video/audio/PDF/image)
 - AWS CDK CLI (`npm install -g aws-cdk`)
 - Git
 - Docker (for AgentCore Runtime container builds)
+- Bedrock model access enabled for: Claude (inference), Titan Embed Text v2 (embeddings), Cohere Rerank v3.5 (KB reranking), and optionally Nova Sonic (voice)
 
 # Deployment
 
@@ -169,20 +173,25 @@ This will deploy:
 2. **Agent Updates** (`./deploy.sh --agentcore-runtime`)
    - Copies latest agent code + dependencies
    - Rebuilds Docker image
-   - Updates AgentCore Runtime
-   - Same Runtime ARN (no frontend changes needed)
+   - Updates both text and voice AgentCore Runtimes
+   - Same Runtime ARNs (no frontend changes needed)
 
 ### What Gets Deployed to AgentCore
 
 **Agent code:**
 - `agents/` — Orchestrator agent with system prompt and tool routing
 - `tools/` — KB search, course management, lesson delivery, quiz generation, progress tracking, web research
-- `lib/` — KB client, DynamoDB client, user context utilities
+- `lib/` — KB client (with Cohere reranking), DynamoDB client, user context utilities
 **Infrastructure references (from SSM/CloudFormation):**
 - Region, KB ID, model ID, DynamoDB table, S3 buckets
+- Rerank model ID (default: `cohere.rerank-v3-5:0`)
 - Tavily API key (if configured via `--tavily-key`)
 - Memory ID, execution role from CDK stack
 - Deployment mode: Container (Docker)
+
+**Two runtimes are deployed:**
+- **Text Runtime**: AG-UI protocol for chat (Claude model)
+- **Voice Runtime**: BidiAgent with Amazon Nova Sonic for speech-to-speech
 
 ### Memory Integration
 
@@ -282,7 +291,7 @@ cd agent
 uv run main.py
 ```
 
-**Note:** Local AG-UI mode does not persist memory across sessions. Use AgentCore Runtime for full memory integration.
+**Note:** Local AG-UI mode persists conversation history via S3SessionManager (when `S3_SESSION_BUCKET` is configured) but does not include AgentCore long-term memory. Use AgentCore Runtime for full memory integration (STM + LTM).
 
 ## Speech-to-Speech Capabilities
 
@@ -319,8 +328,8 @@ When LTM is enabled (default), three strategies enhance conversations:
 ### Getting Started
 1. Access the application at `https://<CloudFront-Domain-Name>.cloudfront.net/`
 2. Sign in with your Cognito credentials
-3. Upload content using the sidebar — videos, PDFs, audio, or images
-4. Wait for processing and KB sync to complete (status shown in sidebar)
+3. Upload content using the DataPanel sidebar — videos, PDFs, audio, or images
+4. Wait for processing and KB sync to complete (status tracked per file in the DataPanel)
 5. Start chatting — ask questions about your content, request a course, or dive into a lesson
 
 ### Learning Workflow
@@ -339,13 +348,13 @@ When LTM is enabled (default), three strategies enhance conversations:
 
 The application supports various file formats through Amazon Bedrock Data Automation:
 
-**Documents:** PDF (.pdf), Microsoft Word (.docx), Text (.txt), HTML (.html)
+**Documents:** PDF (.pdf), Microsoft Word (.doc, .docx), Text (.txt), CSV (.csv)
 
-**Images:** JPEG/JPG (.jpg, .jpeg), PNG (.png), TIFF (.tiff, .tif), WebP (.webp)
+**Images:** JPEG/JPG (.jpg, .jpeg), PNG (.png), TIFF (.tiff), GIF (.gif), BMP (.bmp)
 
-**Video:** MP4 (.mp4), MOV (.mov), WebM (.webm)
+**Video:** MP4 (.mp4), WebM (.webm)
 
-**Audio:** MP3 (.mp3), WAV (.wav), FLAC (.flac), OGG (.ogg), AMR (.amr)
+**Audio:** MP3 (.mp3), WAV (.wav), M4A (.m4a)
 
 ## Troubleshooting
 
